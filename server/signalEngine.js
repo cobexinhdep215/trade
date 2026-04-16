@@ -54,7 +54,7 @@ function analyzeSymbol(symbol) {
   const minData = {
     '1m': closes1m.length >= 30,
     '5m': closes5m.length >= 30,
-    '15m': closes15m.length >= 210,
+    '15m': closes15m.length >= 80,
   };
 
   const hasEnoughData = minData['1m'] && minData['5m'] && minData['15m'];

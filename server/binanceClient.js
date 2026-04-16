@@ -14,7 +14,8 @@ const API_ENDPOINTS = [
   'https://api.binance.com',
   'https://api1.binance.com',
   'https://api2.binance.com',
-  'https://api3.binance.com'
+  'https://api3.binance.com',
+  'https://api.binance.us' // Ensure US-based servers can fetch data
 ];
 
 let ws = null;

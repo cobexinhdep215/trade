@@ -157,7 +157,7 @@ function getPriceNBarsAgo(symbol, timeframe, barsAgo) {
 function getReadySymbols() {
   return config.coins.filter((symbol) => {
     initSymbol(symbol);
-    return cache[symbol]['15m']?.candles.length >= 210; // Need 210 for EMA200
+    return cache[symbol]['15m']?.candles.length >= 80; // Lowered for faster activation
   });
 }
 

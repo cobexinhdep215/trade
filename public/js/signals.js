@@ -58,6 +58,9 @@ const SignalUI = (() => {
     const color = coinColors[symbol] || '#3b82f6';
     const shortAbbr = abbr.slice(0, 3);
 
+    const ch24h = signal ? formatChange(signal.priceChanges?.['24h']) : '<span class="change-cell neutral">—</span>';
+    const price = signal && signal.price ? `$${formatPrice(signal.price)}` : '—';
+
     if (!signal || signal.loading) {
       return `
         <td>
@@ -69,9 +72,9 @@ const SignalUI = (() => {
             </div>
           </div>
         </td>
-        <td><span class="price-cell">—</span></td>
-        <td colspan="3"><span class="change-cell neutral">Loading... (${signal ? `${signal.candleCount?.['15m'] || 0}/210 15m` : ''})</span></td>
-        <td><span class="change-cell neutral">—</span></td>
+        <td><span class="price-cell">${price}</span></td>
+        <td colspan="3"><span class="change-cell neutral">Scanning... (${signal ? `${signal.candleCount?.['15m'] || 0}/80` : ''})</span></td>
+        <td>${ch24h}</td>
         <td><span class="signal-badge loading">Scanning</span></td>
         <td>—</td>
         <td>—</td>
