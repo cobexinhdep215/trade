@@ -47,17 +47,18 @@
     socket = io();
 
     socket.on('connect', () => {
-      console.log('[Socket] Connected');
-      setConnectionStatus(true);
+      console.log('[Socket] Server connected');
+      // Initially set to intermediate state
+      setConnectionStatus('server_only');
     });
 
     socket.on('disconnect', () => {
-      console.log('[Socket] Disconnected');
-      setConnectionStatus(false);
+      console.log('[Socket] Server disconnected');
+      setConnectionStatus('disconnected');
     });
 
     socket.on('connect_error', () => {
-      setConnectionStatus(false);
+      setConnectionStatus('disconnected');
     });
 
     // Full signals update (all coins)
@@ -108,9 +109,13 @@
       SignalUI.renderWinrate(data);
     });
 
-    // Connection status from server
+    // Connection status from server (Binance status)
     socket.on('status', (status) => {
-      setConnectionStatus(status.connected);
+      if (status.connected) {
+        setConnectionStatus('live');
+      } else {
+        setConnectionStatus('server_only');
+      }
     });
   }
 
@@ -157,19 +162,22 @@
 
   /**
    * Update connection status indicator
+   * @param {'live' | 'server_only' | 'disconnected'} state
    */
-  function setConnectionStatus(connected) {
+  function setConnectionStatus(state) {
     const el = document.getElementById('connection-status');
     if (!el) return;
-    const dot = el.querySelector('.status-dot');
     const text = el.querySelector('.status-text');
 
-    if (connected) {
+    if (state === 'live') {
       el.className = 'status-indicator connected';
       text.textContent = 'Live • Binance';
+    } else if (state === 'server_only') {
+      el.className = 'status-indicator warning';
+      text.textContent = 'Server OK • Locating Binance...';
     } else {
       el.className = 'status-indicator disconnected';
-      text.textContent = 'Reconnecting...';
+      text.textContent = 'Server Offline';
     }
   }
 

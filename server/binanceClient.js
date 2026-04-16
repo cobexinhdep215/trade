@@ -1,16 +1,25 @@
-/**
- * Binance WebSocket Client
- * Connects to Binance combined stream for multi-symbol, multi-timeframe kline data
- * Includes auto-reconnect with exponential backoff
- */
-
 const WebSocket = require('ws');
 const config = require('../config.json');
 const dataCache = require('./dataCache');
 
-const BINANCE_WS = 'wss://stream.binance.com:9443/stream';
+// Multiple endpoints to bypass potential IP blocking/limits
+const WS_ENDPOINTS = [
+  'wss://stream.binance.com:9443/stream',
+  'wss://stream.binance.com:443/stream',
+  'wss://stream.binance.com/stream',
+  'wss://stream.binance.us:9443/stream' // Fallback for US-based clouds
+];
+
+const API_ENDPOINTS = [
+  'https://api.binance.com',
+  'https://api1.binance.com',
+  'https://api2.binance.com',
+  'https://api3.binance.com'
+];
 
 let ws = null;
+let currentWsIndex = 0;
+let currentApiIndex = 0;
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 50;
 const BASE_RECONNECT_DELAY = 1000;
@@ -18,10 +27,11 @@ let isConnected = false;
 let onDataCallback = null;
 let reconnectTimer = null;
 let pingInterval = null;
+let lastError = null;
+let connectionStartTime = 0;
 
 /**
- * Build the combined stream subscription message
- * Format: symbol@kline_interval
+ * Build combined stream list
  */
 function buildStreamList() {
   const streams = [];
@@ -30,168 +40,165 @@ function buildStreamList() {
     config.timeframes.forEach((tf) => {
       streams.push(`${symbol}@kline_${tf}`);
     });
-    // Also subscribe to mini ticker for 24h stats
     streams.push(`${symbol}@miniTicker`);
   });
   return streams;
 }
 
 /**
- * Connect to Binance WebSocket
- * @param {Function} callback - Called on each data update with (symbol, timeframe, data)
+ * Connect to Binance WebSocket with fallback
  */
 function connect(callback) {
-  onDataCallback = callback;
+  if (callback) onDataCallback = callback;
 
+  const endpoint = WS_ENDPOINTS[currentWsIndex];
   const streams = buildStreamList();
-  const url = `${BINANCE_WS}?streams=${streams.join('/')}`;
+  const url = `${endpoint}?streams=${streams.join('/')}`;
 
-  console.log(`[Binance] Connecting to ${streams.length} streams...`);
+  console.log(`[Binance] Connecting to ${endpoint} (${streams.length} streams)...`);
+  lastError = null;
 
-  ws = new WebSocket(url);
+  try {
+    ws = new WebSocket(url);
 
-  ws.on('open', () => {
-    isConnected = true;
-    reconnectAttempts = 0;
-    console.log('[Binance] ✅ Connected successfully');
+    ws.on('open', () => {
+      isConnected = true;
+      reconnectAttempts = 0;
+      connectionStartTime = Date.now();
+      console.log(`[Binance] ✅ Connected to ${endpoint}`);
 
-    // Fetch historical klines to fill cache
-    fetchHistoricalKlines();
+      // Fetch historical klines
+      fetchHistoricalKlines();
 
-    // Keep alive ping every 3 minutes
-    if (pingInterval) clearInterval(pingInterval);
-    pingInterval = setInterval(() => {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.ping();
-      }
-    }, 180000);
-  });
+      if (pingInterval) clearInterval(pingInterval);
+      pingInterval = setInterval(() => {
+        if (ws && ws.readyState === WebSocket.OPEN) ws.ping();
+      }, 180000);
+    });
 
-  ws.on('message', (rawData) => {
-    try {
-      const msg = JSON.parse(rawData.toString());
-      if (!msg.data) return;
+    ws.on('message', (rawData) => {
+      try {
+        const msg = JSON.parse(rawData.toString());
+        if (!msg.data) return;
+        const data = msg.data;
 
-      const data = msg.data;
-
-      // Handle kline data
-      if (data.e === 'kline') {
-        const symbol = data.s; // e.g. BTCUSDT
-        const kline = data.k;
-        const timeframe = kline.i; // e.g. 1m
-
-        // Update cache
-        dataCache.updateCandle(symbol, timeframe, kline);
-
-        // Notify signal engine
-        if (onDataCallback) {
-          onDataCallback(symbol, timeframe, {
-            type: 'kline',
-            isClosed: kline.x,
-            price: parseFloat(kline.c),
-          });
+        if (data.e === 'kline') {
+          dataCache.updateCandle(data.s, data.k.i, data.k);
+          if (onDataCallback) {
+            onDataCallback(data.s, data.k.i, {
+              type: 'kline',
+              isClosed: data.k.x,
+              price: parseFloat(data.k.c),
+            });
+          }
         }
-      }
 
-      // Handle mini ticker (24h stats)
-      if (data.e === '24hrMiniTicker') {
-        const symbol = data.s;
-        if (onDataCallback) {
-          onDataCallback(symbol, null, {
-            type: 'ticker',
-            price: parseFloat(data.c),
-            open24h: parseFloat(data.o),
-            high24h: parseFloat(data.h),
-            low24h: parseFloat(data.l),
-            volume24h: parseFloat(data.v),
-            quoteVolume24h: parseFloat(data.q),
-          });
+        if (data.e === '24hrMiniTicker') {
+          if (onDataCallback) {
+            onDataCallback(data.s, null, {
+              type: 'ticker',
+              price: parseFloat(data.c),
+              open24h: parseFloat(data.o),
+              high24h: parseFloat(data.h),
+              low24h: parseFloat(data.l),
+              volume24h: parseFloat(data.v),
+              quoteVolume24h: parseFloat(data.q),
+            });
+          }
         }
+      } catch (err) {
+        // Silent catch for parse errors
       }
-    } catch (err) {
-      console.error('[Binance] Parse error:', err.message);
-    }
-  });
+    });
 
-  ws.on('error', (err) => {
-    console.error('[Binance] WebSocket error:', err.message);
-  });
+    ws.on('error', (err) => {
+      lastError = `WS Error: ${err.message}`;
+      console.error(`[Binance] WebSocket error on ${endpoint}:`, err.message);
+    });
 
-  ws.on('close', (code, reason) => {
-    isConnected = false;
-    console.log(`[Binance] ❌ Disconnected (code: ${code})`);
-    if (pingInterval) clearInterval(pingInterval);
+    ws.on('close', (code, reason) => {
+      isConnected = false;
+      console.log(`[Binance] ❌ Disconnected from ${endpoint} (code: ${code})`);
+      scheduleReconnect();
+    });
+
+  } catch (err) {
+    lastError = `Setup Error: ${err.message}`;
+    console.error('[Binance] Failed to initialize WebSocket:', err.message);
     scheduleReconnect();
-  });
-
-  ws.on('pong', () => {
-    // Connection alive
-  });
+  }
 }
 
 /**
- * Reconnect with exponential backoff
+ * Reconnect logic with endpoint cycling
  */
 function scheduleReconnect() {
+  if (reconnectTimer) clearTimeout(reconnectTimer);
+  if (pingInterval) clearInterval(pingInterval);
+
   if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-    console.error('[Binance] Max reconnect attempts reached. Giving up.');
+    console.error('[Binance] Max reconnect attempts reached.');
     return;
   }
 
-  const delay = Math.min(BASE_RECONNECT_DELAY * Math.pow(2, reconnectAttempts), 30000);
+  // Cycle endpoints on every second failure
+  if (reconnectAttempts % 2 === 1) {
+    currentWsIndex = (currentWsIndex + 1) % WS_ENDPOINTS.length;
+    console.log(`[Binance] Switching to endpoint: ${WS_ENDPOINTS[currentWsIndex]}`);
+  }
+
+  const delay = Math.min(BASE_RECONNECT_DELAY * Math.pow(1.5, reconnectAttempts), 15000);
   reconnectAttempts++;
 
-  console.log(`[Binance] Reconnecting in ${delay}ms (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`);
-
-  if (reconnectTimer) clearTimeout(reconnectTimer);
-  reconnectTimer = setTimeout(() => {
-    connect(onDataCallback);
-  }, delay);
+  reconnectTimer = setTimeout(() => connect(), delay);
 }
 
 /**
- * Fetch historical klines via REST API to pre-fill cache
+ * Fetch historical data using REST API fallbacks
  */
 async function fetchHistoricalKlines() {
   const fetch = require('node-fetch');
 
   for (const coin of config.coins) {
     for (const tf of config.timeframes) {
-      try {
-        const url = `https://api.binance.com/api/v3/klines?symbol=${coin}&interval=${tf}&limit=${config.cache.maxCandles}`;
-        const response = await fetch(url);
-        const klines = await response.json();
+      let success = false;
+      let attempt = 0;
 
-        if (Array.isArray(klines)) {
-          klines.forEach((k) => {
-            const kline = {
-              t: k[0],        // Open time
-              o: k[1],        // Open
-              h: k[2],        // High
-              l: k[3],        // Low
-              c: k[4],        // Close
-              v: k[5],        // Volume
-              T: k[6],        // Close time
-              x: true,        // Mark as closed
-            };
-            dataCache.updateCandle(coin, tf, kline);
-          });
-          console.log(`[Binance] Loaded ${klines.length} historical ${tf} candles for ${coin}`);
+      while (!success && attempt < API_ENDPOINTS.length) {
+        const baseUrl = API_ENDPOINTS[(currentApiIndex + attempt) % API_ENDPOINTS.length];
+        try {
+          const url = `${baseUrl}/api/v3/klines?symbol=${coin}&interval=${tf}&limit=${config.cache.maxCandles}`;
+          const response = await fetch(url, { timeout: 5000 });
+          
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          
+          const klines = await response.json();
+          if (Array.isArray(klines)) {
+            klines.forEach((k) => {
+              dataCache.updateCandle(coin, tf, {
+                t: k[0], o: k[1], h: k[2], l: k[3], c: k[4], v: k[5], T: k[6], x: true
+              });
+            });
+            success = true;
+          }
+        } catch (err) {
+          console.warn(`[Binance] REST failed for ${coin} ${tf} on ${baseUrl}: ${err.message}`);
+          attempt++;
+          lastError = `REST Error: ${err.message} on ${baseUrl}`;
         }
-      } catch (err) {
-        console.error(`[Binance] Failed to fetch historical ${tf} for ${coin}:`, err.message);
       }
 
-      // Small delay to avoid rate limiting
-      await new Promise((r) => setTimeout(r, 100));
+      if (success) {
+        // Update current valid API index
+        currentApiIndex = (currentApiIndex + attempt) % API_ENDPOINTS.length;
+      }
+
+      await new Promise(r => setTimeout(r, 200));
     }
   }
-  console.log('[Binance] ✅ Historical data loaded');
+  console.log('[Binance] ✅ Historical data loading cycle complete');
 }
 
-/**
- * Disconnect cleanly
- */
 function disconnect() {
   if (reconnectTimer) clearTimeout(reconnectTimer);
   if (pingInterval) clearInterval(pingInterval);
@@ -201,22 +208,18 @@ function disconnect() {
     ws = null;
   }
   isConnected = false;
-  console.log('[Binance] Disconnected');
 }
 
-/**
- * Check if connected
- */
 function getStatus() {
   return {
     connected: isConnected,
+    endpoint: WS_ENDPOINTS[currentWsIndex],
+    apiEndpoint: API_ENDPOINTS[currentApiIndex],
     reconnectAttempts,
+    lastError,
+    uptimeSeconds: isConnected ? Math.floor((Date.now() - connectionStartTime) / 1000) : 0,
     cacheStats: dataCache.getCacheStats(),
   };
 }
 
-module.exports = {
-  connect,
-  disconnect,
-  getStatus,
-};
+module.exports = { connect, disconnect, getStatus };

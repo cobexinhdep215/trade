@@ -31,6 +31,18 @@ app.get('/api/config', (req, res) => {
   });
 });
 
+// API endpoint: debug info
+app.get('/api/debug', (req, res) => {
+  res.json({
+    serverTime: new Date().toISOString(),
+    binance: binanceClient.getStatus(),
+    config: {
+      coins: config.coins,
+      timeframes: config.timeframes
+    }
+  });
+});
+
 // API endpoint: status
 app.get('/api/status', (req, res) => {
   res.json(binanceClient.getStatus());
