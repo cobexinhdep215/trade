@@ -124,7 +124,7 @@ function startPeriodicAnalysis() {
 
 // ===== START =====
 
-const PORT = config.server.port;
+const PORT = process.env.PORT || config.server.port;
 
 server.listen(PORT, () => {
   console.log('');

@@ -2,6 +2,9 @@
   "name": "crypto-signal-dashboard",
   "version": "1.0.0",
   "description": "Real-time crypto trading signal dashboard with multi-timeframe analysis",
+  "engines": {
+    "node": ">=18"
+  },
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js",
