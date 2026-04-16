@@ -1,0 +1,62 @@
+{
+  "coins": [
+    "BTCUSDT",
+    "ETHUSDT",
+    "SOLUSDT",
+    "LTCUSDT",
+    "XRPUSDT",
+    "TAOUSDT",
+    "PAXGUSDT"
+  ],
+  "timeframes": ["1m", "5m", "15m"],
+  "signal": {
+    "minScore": 80,
+    "cooldownMs": 300000,
+    "scoreWeights": {
+      "trend": 30,
+      "macd": 20,
+      "volume": 15,
+      "rsi": 15,
+      "candlestick": 20
+    }
+  },
+  "indicators": {
+    "ema": {
+      "fast": 50,
+      "slow": 200
+    },
+    "rsi": {
+      "period": 14,
+      "overbought": 70,
+      "oversold": 30
+    },
+    "macd": {
+      "fast": 12,
+      "slow": 26,
+      "signal": 9
+    },
+    "bb": {
+      "period": 20,
+      "stddev": 2
+    },
+    "atr": {
+      "period": 14,
+      "slMultiplier": 1.5,
+      "tpMultiplier": 2.5
+    },
+    "volume": {
+      "maPeriod": 20,
+      "spikeMultiplier": 1.5
+    }
+  },
+  "cache": {
+    "maxCandles": 250
+  },
+  "server": {
+    "port": 3000
+  },
+  "winrate": {
+    "checkDelayMs": 1800000,
+    "maxHistory": 100
+  }
+}
